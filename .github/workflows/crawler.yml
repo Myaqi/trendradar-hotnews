@@ -38,6 +38,7 @@ on:
     - cron: "33 * * * *"
 
   workflow_dispatch:
+    # 手动运行用于预览当前热点卡片；定时运行仍只推送新增内容。
 
 concurrency:
   group: crawler-${{ github.ref_name }}
@@ -166,6 +167,7 @@ jobs:
           S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
           S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
           S3_REGION: ${{ secrets.S3_REGION }}
+          SCHEDULE_ENABLED: ${{ github.event_name == 'workflow_dispatch' && 'false' || 'true' }}
           GITHUB_ACTIONS: true
         run: uv run python -m trendradar
 

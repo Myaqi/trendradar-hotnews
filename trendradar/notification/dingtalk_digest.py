@@ -102,6 +102,27 @@ def render_dingtalk_digest(report_data, *, max_bytes, now, mode, region_order,
     for item, is_rss in entries:
         grouped[category_for(item)].append((item, is_rss))
 
+    def ranking(entry):
+        item, _ = entry
+        ranks = [rank for rank in item.get("ranks", []) if isinstance(rank, (int, float)) and rank > 0]
+        return min(ranks) if ranks else 9999
+
+    for category in grouped:
+        grouped[category].sort(key=ranking)
+
+    # Take turns across categories, so a single noisy source cannot fill the card.
+    selected = []
+    while len(selected) < 10:
+        appended = False
+        for category, _ in CATEGORIES:
+            if grouped[category]:
+                selected.append((category, *grouped[category].pop(0)))
+                appended = True
+                if len(selected) == 10:
+                    break
+        if not appended:
+            break
+
     platform_total = report_data.get("platform_total", 0)
     failed = report_data.get("failed_ids", [])
     rss_total = report_data.get("rss_source_total", 0)
@@ -111,48 +132,36 @@ def render_dingtalk_digest(report_data, *, max_bytes, now, mode, region_order,
         status.append(f"热榜源 {max(0, platform_total - len(failed))}/{platform_total}")
     if rss_total:
         status.append(f"订阅源 {max(0, rss_total - rss_failed)}/{rss_total}")
-    footer = "\n" + " · ".join(status) + "\n\n点击标题查看详情 · 无正文摘要时显示榜单或订阅信息\n\n按标题与来源自动分栏 · 热榜可能含上游缓存\n"
-    if failed:
-        footer += "采集失败：" + escape_text("、".join(map(str, failed))) + "\n"
-    batches = []
     mode_label = {"current": "当前热点", "daily": "全天汇总", "incremental": "新增热点"}.get(mode, "热点")
-    for name, icon in CATEGORIES:
-        items = grouped[name]
-        if not items:
-            continue
+    card = [
+        "# Trend Radar",
+        f"{now:%m-%d %H:%M} · {mode_label} · 精选 {len(selected)}/{len(entries)} 条",
+        "",
+        "---",
+        "",
+    ]
+    display_names = {"综合要闻": "要闻", "财经": "财经", "科技": "科技", "社区娱乐": "生活"}
+    last_category = None
+    for number, (category, item, is_rss) in enumerate(selected, 1):
+        if category != last_category:
+            card.extend((f"**{display_names[category]}**", ""))
+            last_category = category
+        title = escape_text(item.get("title") or "无标题")
+        if len(title) > 58:
+            title = title[:57] + "…"
+        url = item.get("mobile_url") or item.get("mobileUrl") or item.get("url") or ""
+        if urlsplit(url).scheme in ("http", "https"):
+            url = url.replace(" ", "%20").replace("(", "%28").replace(")", "%29").replace("\n", "").replace("\r", "")
+            title = f"[{title}]({url})"
+        source = escape_text(item.get("source_name") or item.get("feed_name") or "新闻源")
+        rank = ranking((item, is_rss))
+        meta = source if is_rss or rank == 9999 else f"{source} · 热榜 #{rank:g}"
+        card.extend((f"{number}. {title}", f"   {meta}", ""))
 
-        def header(page, pages):
-            return (f"## {icon} {name} · 热点速读\n\n"
-                    f"{now:%m-%d %H:%M} · {mode_label} · 本栏 {len(items)} 条 · {page}/{pages}\n\n"
-                    f"本轮共 {len(entries)} 条，全部分栏发送\n\n")
-
-        reserve = len((header(9999, 9999) + footer).encode("utf-8"))
-        pages, blocks, size = [], [], 0
-        for number, (item, is_rss) in enumerate(items, 1):
-            block = item_block(item, number, is_rss, mode)
-            block_size = len(block.encode("utf-8"))
-            if block_size + reserve > max_bytes:
-                raise ValueError("单条新闻超过钉钉消息上限，请增大消息大小后重试；未截断新闻")
-            if blocks and (len(blocks) >= 12 or size + block_size + reserve > max_bytes):
-                pages.append("".join(blocks))
-                blocks, size = [], 0
-            blocks.append(block)
-            size += block_size
-        if blocks:
-            pages.append("".join(blocks))
-        batches.extend(header(i, len(pages)) + page + footer for i, page in enumerate(pages, 1))
-
-    if "ai_analysis" in region_order and ai_content:
-        heading = "## 🧠 AI 分析\n\n"
-        page = heading
-        for line in ai_content.splitlines(keepends=True):
-            if len((heading + line).encode("utf-8")) > max_bytes:
-                raise ValueError("AI 分析单行超过钉钉消息上限")
-            if len((page + line).encode("utf-8")) > max_bytes:
-                batches.append(page)
-                page = heading
-            page += line
-        batches.append(page)
-    if not batches:
-        batches = [f"## 📰 热点速读\n\n{now:%m-%d %H:%M} · 本轮暂无匹配热点\n" + footer]
-    return batches
+    card.extend(("---", "", f"> {' · '.join(status) if status else '热点源状态正常'}", "> 其余热点保留在云端历史中。"))
+    if failed:
+        card.append("> 本轮未完成：" + escape_text("、".join(map(str, failed))))
+    result = "\n".join(card)
+    if len(result.encode("utf-8")) > max_bytes:
+        raise ValueError("热点卡片超过钉钉消息上限")
+    return [result]
