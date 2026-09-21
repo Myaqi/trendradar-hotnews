@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trend Radar · 管理台</title>
+  <style>
+    :root { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; background:#f5f5f7; color:#1d1d1f; }
+    body { margin:0; } main { max-width:900px; margin:auto; padding:54px 20px 80px; } h1 { margin:8px 0; font-size:clamp(36px,7vw,56px); letter-spacing:-.05em; } h2 { font-size:21px; margin:0 0 15px; } .eyebrow { color:#0071e3; font-weight:700; font-size:13px; letter-spacing:.08em; } .lead,.hint { color:#6e6e73; line-height:1.65; } .card { margin-top:24px; padding:26px; border:1px solid #e5e5ea; border-radius:24px; background:#fff; box-shadow:0 12px 36px #0000000d; } .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; } label { display:block; margin:12px 0 7px; font-size:13px; color:#424245; font-weight:650; } input,textarea { box-sizing:border-box; width:100%; border:1px solid #d2d2d7; border-radius:12px; padding:12px; font:inherit; } textarea { min-height:400px; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:13px; line-height:1.5; } button,a.button { display:inline-block; margin:14px 8px 0 0; border:0; border-radius:999px; background:#0071e3; color:white; padding:11px 18px; font:inherit; font-weight:650; cursor:pointer; text-decoration:none; } button.secondary,a.secondary { background:#e8e8ed; color:#1d1d1f; } .hidden { display:none; } .status { min-height:22px; margin:14px 0 0; color:#248a3d; } .warning { border-left:3px solid #ff9f0a; padding-left:12px; font-size:14px; } @media(max-width:620px) { .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body><main>
+  <div class="eyebrow">Trend Radar</div><h1>管理台</h1>
+  <p class="lead">修改云端配置，保存后自动刷新热点网页。管理密码和 GitHub 写入权限只保存在 Cloudflare 服务端。</p>
+
+  <section id="login-card" class="card"><h2>管理员登录</h2><label for="password">管理密码</label><input id="password" type="password" autocomplete="current-password" placeholder="输入你在 Cloudflare 设置的管理密码"><button id="login">登录管理台</button><p id="login-status" class="status"></p></section>
+
+  <section id="dashboard" class="hidden">
+    <div class="card"><h2>快速添加 RSS</h2><div class="grid"><div><label for="rss-name">名称</label><input id="rss-name" placeholder="BBC 中文"></div><div><label for="rss-url">RSS / Atom 地址</label><input id="rss-url" type="url" placeholder="https://example.com/feed.xml"></div><div><label for="rss-id">源 ID</label><input id="rss-id" placeholder="bbc-chinese"></div></div><button id="add-rss" class="secondary">加入配置草稿</button><p class="hint">RSS 可直接添加公开订阅地址。热榜平台请在下方完整配置中启用已有平台 ID；新热榜网站需要上游 NewsNow 支持。</p></div>
+    <div class="card"><h2>完整云端配置</h2><textarea id="config" spellcheck="false" placeholder="正在读取云端配置..."></textarea><button id="save">保存并立即刷新网页</button><button id="reload" class="secondary">放弃修改并重新读取</button><button id="logout" class="secondary">退出</button><p class="warning hint">保存会提交 config.yaml 到你的仓库，并触发一次 GitHub Actions。首页会在任务完成后更新；不会向钉钉推送。</p><p id="app-status" class="status"></p></div>
+  </section>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  const loginStatus = $('login-status'), appStatus = $('app-status');
+  async function readConfig() {
+    appStatus.textContent = '正在读取云端配置…';
+    const r = await fetch('/api/config'); if (!r.ok) throw new Error(await r.text());
+    $('config').value = (await r.json()).content; appStatus.textContent = '已读取云端配置。';
+  }
+  async function enter() { $('login-card').classList.add('hidden'); $('dashboard').classList.remove('hidden'); await readConfig(); }
+  $('login').onclick = async () => { try { loginStatus.textContent = '正在登录…'; const r = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('password').value})}); if(!r.ok) throw new Error(await r.text()); await enter(); } catch(e) { loginStatus.textContent=e.message; } };
+  $('password').addEventListener('keydown', e => { if(e.key==='Enter') $('login').click(); });
+  $('reload').onclick = () => readConfig().catch(e => appStatus.textContent=e.message);
+  $('logout').onclick = async () => { await fetch('/api/logout',{method:'POST'}); location.reload(); };
+  $('add-rss').onclick = () => {
+    const name=$('rss-name').value.trim(), url=$('rss-url').value.trim(), id=$('rss-id').value.trim();
+    if(!name || !url || !/^[-a-z0-9]+$/.test(id)) { appStatus.textContent='请填写名称、有效 RSS 地址和小写英文源 ID。'; return; }
+    const yaml=$('config').value, feeds=yaml.indexOf('\n  feeds:'); if(feeds<0) { appStatus.textContent='未找到 rss.feeds，请直接编辑完整配置。'; return; }
+    const marker=yaml.indexOf('\n    # 自定义源示例',feeds), fallback=yaml.indexOf('\n\n# ===============================================================',feeds), at=marker>=0?marker:fallback;
+    if(at<0) { appStatus.textContent='无法定位 RSS 列表，请直接编辑完整配置。'; return; }
+    const safe=s=>s.replaceAll('"','\\"'); $('config').value=yaml.slice(0,at)+`\n    - id: "${id}"\n      name: "${safe(name)}"\n      url: "${safe(url)}"\n`+yaml.slice(at); appStatus.textContent='RSS 已加入草稿，请点击“保存并立即刷新网页”。';
+  };
+  $('save').onclick = async () => { try { appStatus.textContent='正在保存并启动刷新…'; const r=await fetch('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:$('config').value})}); if(!r.ok) throw new Error(await r.text()); appStatus.textContent=(await r.json()).message; } catch(e) { appStatus.textContent=e.message; } };
+  fetch('/api/config').then(r => { if(r.ok) enter(); }).catch(() => {});
+</script></body></html>

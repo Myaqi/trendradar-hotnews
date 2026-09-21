@@ -35,10 +35,11 @@ on:
     #   "15 * * * *"     → 每小时第15分钟 / minute 15 every hour
     #   "30 0-14 * * *"  → 北京时间 8:00-22:00 每小时第30分钟 / Beijing 8am-10pm
     #
-    - cron: "33 * * * *"
+    # 每天北京时间 00:00（GitHub Actions cron 使用 UTC）
+    - cron: "0 16 * * *"
 
   workflow_dispatch:
-    # 手动运行用于预览当前热点卡片；定时运行仍只推送新增内容。
+    # 手动运行与定时运行都生成当前完整网页。
 
 concurrency:
   group: crawler-${{ github.ref_name }}
@@ -167,7 +168,8 @@ jobs:
           S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
           S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
           S3_REGION: ${{ secrets.S3_REGION }}
-          SCHEDULE_ENABLED: ${{ github.event_name == 'workflow_dispatch' && 'false' || 'true' }}
+          # 不启用时间线：按 config 的 report.mode=current 生成完整当前榜单网页。
+          SCHEDULE_ENABLED: false
           GITHUB_ACTIONS: true
         run: uv run python -m trendradar
 
@@ -207,6 +209,10 @@ jobs:
           rm -rf cloudflare_dist
           mkdir -p cloudflare_dist
           cp index.html cloudflare_dist/index.html
+          # 管理页是纯前端配置工作台；不包含任何写入密钥。
+          cp -R admin cloudflare_dist/admin
+          # Pages Functions 提供登录、云端配置读写和刷新触发；密钥仅保存在 Cloudflare。
+          cp -R functions cloudflare_dist/functions
 
       - name: Deploy to Cloudflare Pages
         if: success() && steps.cf_check.outputs.enabled == 'true'
