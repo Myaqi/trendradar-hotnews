@@ -647,6 +647,7 @@ def count_rss_frequency(
                     "source_name": item.get("feed_name", item.get("feed_id", "RSS")),
                     "time_display": time_display,
                     "count": 1,  # RSS 条目通常只出现一次
+                    "summary": item.get("summary", ""),
                     "ranks": [rank],
                     "rank_threshold": rank_threshold,
                     "url": url,

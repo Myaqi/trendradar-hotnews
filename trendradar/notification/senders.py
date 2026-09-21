@@ -293,8 +293,7 @@ def send_to_dingtalk(
         report_type=report_type,
     )
 
-    # 统一添加批次头部（已预留空间，不会超限）
-    batches = add_batch_headers(batches, "dingtalk", batch_size)
+    # 栏目消息已包含分页信息，避免在顶部重复堆叠批次标题。
 
     print(f"{log_prefix}消息分为 {len(batches)} 批次发送 [{report_type}]")
 
@@ -308,7 +307,7 @@ def send_to_dingtalk(
         payload = {
             "msgtype": "markdown",
             "markdown": {
-                "title": f"TrendRadar 热点分析报告 - {report_type}",
+                "title": batch_content.splitlines()[0].lstrip("# "),
                 "text": batch_content,
             },
         }

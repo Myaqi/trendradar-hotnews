@@ -196,6 +196,16 @@ def split_content_into_batches(
         else:
             max_bytes = sizes.get("default", 4000)
 
+    if format_type == "dingtalk":
+        from trendradar.notification.dingtalk_digest import render_dingtalk_digest
+        return render_dingtalk_digest(
+            report_data, max_bytes=max_bytes,
+            now=get_time_func() if get_time_func else datetime.now(),
+            mode=mode, region_order=region_order, rss_items=rss_items,
+            rss_new_items=rss_new_items, standalone_data=standalone_data,
+            ai_content=ai_content, show_new_section=show_new_section,
+        )
+
     batches = []
 
     total_hotlist_count = sum(
